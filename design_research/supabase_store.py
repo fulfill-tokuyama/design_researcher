@@ -440,7 +440,15 @@ class SupabaseDesignStore:
             return []
 
         except Exception as e:
-            log.warning(f"ベクトル検索失敗: {e}")
+            err_str = str(e)
+            if "404" in err_str or "NOT_FOUND" in err_str:
+                log.warning(
+                    f"ベクトル検索失敗 (404): match_designs RPCが未設定の可能性があります。"
+                    f"Supabase SQL Editorで以下を実行してください:\n"
+                    f"  GRANT EXECUTE ON FUNCTION match_designs(vector(768), float, int, text, float) TO anon;"
+                )
+            else:
+                log.warning(f"ベクトル検索失敗: {e}")
             return []
 
     def search_similar_to_entry(
