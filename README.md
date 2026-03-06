@@ -290,7 +290,7 @@ python supabase_store.py --stats
 ```
 leadgenius-design-suite/
 ├── README.md                          # このファイル
-├── .env.example                       # 環境変数テンプレート
+├── .env                               # 環境変数（要作成・gitignore済み）
 │
 ├── lead_scraper/                      # リード収集
 │   ├── lead_spider.py                 # Scrapling Spider
