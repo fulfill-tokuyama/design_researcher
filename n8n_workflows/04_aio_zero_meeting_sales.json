@@ -1,0 +1,172 @@
+{
+  "name": "🎯 AIO Insight ゼロミーティングセールス",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "aio-insight-form",
+        "responseMode": "responseNode"
+      },
+      "id": "webhook-form",
+      "name": "フォーム受信 Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "aio-insight-form",
+      "notes": "AIO InsightのLPフォーム送信をこのWebhookで受ける"
+    },
+    {
+      "parameters": {
+        "jsCode": "// フォームデータを正規化\nconst body = $input.first().json.body || $input.first().json;\n\nreturn [{\n  json: {\n    company_name: body.company_name || body.company || '',\n    contact_name: body.contact_name || body.name || '',\n    email: body.email || '',\n    phone: body.phone || '',\n    website: body.website || body.url || '',\n    message: body.message || '',\n    submitted_at: new Date().toISOString(),\n  }\n}];"
+      },
+      "id": "normalize-form",
+      "name": "フォームデータ正規化",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.firecrawl.dev/v1/scrape",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.FIRECRAWL_API_KEY }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"url\": \"{{ $json.website }}\",\n  \"formats\": [\"branding\", \"markdown\"]\n}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "firecrawl-prospect",
+      "name": "見込み客サイト分析",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 0],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-goog-api-key", "value": "={{ $env.GEMINI_API_KEY }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [{\n    \"parts\": [{\n      \"text\": \"あなたはLLMO/AIO（AI検索最適化）の専門家です。以下の企業のWebサイト情報に基づいて、簡易LLMO診断レポートをJSON形式で作成してください。\\n\\n企業名: {{ $('フォームデータ正規化').item.json.company_name }}\\nURL: {{ $('フォームデータ正規化').item.json.website }}\\n\\nサイトの概要:\\n{{ ($('見込み客サイト分析').item.json.data || {}).markdown ? $('見込み客サイト分析').item.json.data.markdown.substring(0, 2000) : 'サイトデータ取得不可' }}\\n\\nブランディング:\\n{{ JSON.stringify(($('見込み客サイト分析').item.json.data || {}).branding || {}).substring(0, 1000) }}\\n\\n以下のJSON形式のみ出力:\\n{\\n  \\\"overall_score\\\": 0-100,\\n  \\\"summary\\\": \\\"全体評価を2-3文で\\\",\\n  \\\"ai_visibility\\\": {\\n    \\\"score\\\": 0-100,\\n    \\\"issues\\\": [\\\"課題1\\\", \\\"課題2\\\"]\\n  },\\n  \\\"content_quality\\\": {\\n    \\\"score\\\": 0-100,\\n    \\\"issues\\\": [\\\"課題1\\\"]\\n  },\\n  \\\"technical_seo\\\": {\\n    \\\"score\\\": 0-100,\\n    \\\"issues\\\": [\\\"課題1\\\"]\\n  },\\n  \\\"recommendations\\\": [\\n    {\\\"priority\\\": \\\"高\\\", \\\"action\\\": \\\"具体的なアクション1\\\"},\\n    {\\\"priority\\\": \\\"中\\\", \\\"action\\\": \\\"具体的なアクション2\\\"},\\n    {\\\"priority\\\": \\\"低\\\", \\\"action\\\": \\\"具体的なアクション3\\\"}\\n  ],\\n  \\\"email_body\\\": \\\"診断結果をお伝えするメール本文（200-300字）\\\"\\n}\"\n    }]\n  }],\n  \"generationConfig\": { \"temperature\": 0.3, \"maxOutputTokens\": 2048 }\n}"
+      },
+      "id": "gemini-diagnosis",
+      "name": "Gemini LLMO診断",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Gemini レスポンスから診断JSONを抽出\nconst resp = $input.first().json;\nlet text = '';\ntry {\n  text = resp.candidates[0].content.parts[0].text || '';\n} catch(e) { text = ''; }\n\ntext = text.replace(/```json\\s*/g, '').replace(/```/g, '').trim();\nlet diagnosis = {};\ntry { diagnosis = JSON.parse(text); } catch(e) { diagnosis = { error: 'パースエラー', raw: text }; }\n\nconst formData = $('フォームデータ正規化').item.json;\n\nreturn [{\n  json: {\n    ...formData,\n    diagnosis,\n    email_body: diagnosis.email_body || '',\n    overall_score: diagnosis.overall_score || 0,\n  }\n}];"
+      },
+      "id": "parse-diagnosis",
+      "name": "診断結果パース",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.resend.com/emails",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.RESEND_API_KEY }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"from\": \"{{ $env.SENDER_EMAIL }}\",\n  \"to\": [\"{{ $json.email }}\"],\n  \"subject\": \"【AIO Insight】{{ $json.company_name }}様 LLMO診断レポート\",\n  \"html\": \"<div style='font-family: Hiragino Sans, Yu Gothic, sans-serif; font-size: 14px; line-height: 1.8; color: #333;'>{{ $json.email_body.replace(/\\n/g, '<br>') }}<br><br>---<br>Fulfill株式会社<br>AIO Insight チーム</div>\"\n}"
+      },
+      "id": "send-diagnosis-email",
+      "name": "診断レポートメール送信",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, -100]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "AIO_Leads" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "日付": "={{ new Date().toLocaleDateString('ja-JP') }}",
+            "企業名": "={{ $json.company_name }}",
+            "担当者": "={{ $json.contact_name }}",
+            "メール": "={{ $json.email }}",
+            "URL": "={{ $json.website }}",
+            "LLMOスコア": "={{ $json.overall_score }}",
+            "診断送信": "完了",
+            "ステータス": "診断送信済み"
+          }
+        }
+      },
+      "id": "sheets-aio-log",
+      "name": "Google Sheets AIOリード記録",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1100, 100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.DISCORD_WEBHOOK_URL }}",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "content",
+              "value": "=🎯 **AIO Insight 新規リード**\n\n企業: {{ $json.company_name }}\n担当: {{ $json.contact_name }}\nLLMOスコア: {{ $json.overall_score }}/100\n\n📧 自動診断レポート送信済み"
+            }
+          ]
+        }
+      },
+      "id": "notify-aio-lead",
+      "name": "新規リード通知",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"success\": true, \"message\": \"診断レポートをメールでお送りしました。\" }"
+      },
+      "id": "webhook-response",
+      "name": "フォーム応答",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1320, 0]
+    }
+  ],
+  "connections": {
+    "フォーム受信 Webhook": { "main": [[{ "node": "フォームデータ正規化", "type": "main", "index": 0 }]] },
+    "フォームデータ正規化": { "main": [[{ "node": "見込み客サイト分析", "type": "main", "index": 0 }]] },
+    "見込み客サイト分析": { "main": [[{ "node": "Gemini LLMO診断", "type": "main", "index": 0 }]] },
+    "Gemini LLMO診断": { "main": [[{ "node": "診断結果パース", "type": "main", "index": 0 }]] },
+    "診断結果パース": {
+      "main": [[
+        { "node": "診断レポートメール送信", "type": "main", "index": 0 },
+        { "node": "Google Sheets AIOリード記録", "type": "main", "index": 0 },
+        { "node": "新規リード通知", "type": "main", "index": 0 },
+        { "node": "フォーム応答", "type": "main", "index": 0 }
+      ]]
+    }
+  },
+  "settings": { "timezone": "Asia/Tokyo" }
+}

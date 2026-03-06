@@ -1,0 +1,198 @@
+{
+  "name": "📧 リード収集 → メール → フォローアップ",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [1],
+              "triggerAtHour": 9,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "weekly-trigger",
+      "name": "毎週月曜AM9:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "command": "cd /path/to/leadgenius-design-suite/lead_scraper && python pipeline.py --targets targets.json --dry-run --output ./output 2>&1"
+      },
+      "id": "run-scraper",
+      "name": "リード収集実行",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [220, 0],
+      "notes": "--dry-run を外すと実際にメール送信。最初はdry-runで確認推奨"
+    },
+    {
+      "parameters": {
+        "filePath": "/path/to/leadgenius-design-suite/lead_scraper/output/pipeline_result_*.json",
+        "options": { "fileName": "" }
+      },
+      "id": "read-results",
+      "name": "収集結果読み込み",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// パイプライン結果をパース\nconst data = JSON.parse($input.first().json.data);\nconst leads = data.leads || [];\n\n// スコア付きリードを抽出\nconst scored = leads\n  .filter(l => l.scoring && l.scoring.score >= 40)\n  .sort((a, b) => (b.scoring?.score || 0) - (a.scoring?.score || 0));\n\nconst hot = scored.filter(l => (l.scoring?.score || 0) >= 70);\nconst warm = scored.filter(l => {\n  const s = l.scoring?.score || 0;\n  return s >= 40 && s < 70;\n});\n\nreturn [{\n  json: {\n    total: leads.length,\n    scored_count: scored.length,\n    hot_count: hot.length,\n    warm_count: warm.length,\n    hot_leads: hot.map(l => ({\n      company: l.company_name,\n      score: l.scoring.score,\n      email: l.email,\n      phone: l.phone,\n      website: l.website,\n      reasoning: l.scoring.reasoning,\n      email_subject: (l.generated_email || {}).subject || '',\n      email_body: (l.generated_email || {}).body || '',\n      follow_up_timing: (l.generated_email || {}).follow_up_timing || '3日後',\n    })),\n    warm_leads: warm.map(l => ({\n      company: l.company_name,\n      score: l.scoring.score,\n      email: l.email,\n    })),\n  }\n}];"
+      },
+      "id": "parse-leads",
+      "name": "リードパース & 分類",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "id": "has-hot",
+              "leftValue": "={{ $json.hot_count }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ]
+        }
+      },
+      "id": "if-hot-leads",
+      "name": "HOTリードあり？",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [880, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// HOTリードを個別アイテムに展開（メール送信用）\nconst hotLeads = $input.first().json.hot_leads || [];\nreturn hotLeads.map(lead => ({ json: lead }));"
+      },
+      "id": "split-hot-leads",
+      "name": "HOTリード展開",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, -200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.resend.com/emails",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.RESEND_API_KEY }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"from\": \"{{ $env.SENDER_EMAIL }}\",\n  \"to\": [\"{{ $json.email }}\"],\n  \"subject\": \"{{ $json.email_subject }}\",\n  \"html\": \"<div style='font-family: Hiragino Sans, Yu Gothic, sans-serif; font-size: 14px; line-height: 1.8; color: #333;'>{{ $json.email_body.replace(/\\n/g, '<br>') }}</div>\"\n}"
+      },
+      "id": "send-email",
+      "name": "Resend メール送信",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1320, -300],
+      "notes": "本番運用時は --dry-run を外してからこのノードを有効化"
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "calendar": { "__rl": true, "mode": "list", "value": "primary" },
+        "start": "={{ DateTime.now().plus({ days: 3 }).toISO() }}",
+        "end": "={{ DateTime.now().plus({ days: 3, hours: 1 }).toISO() }}",
+        "additionalFields": {
+          "summary": "=📞 フォローアップ: {{ $json.company }}",
+          "description": "=リードスコア: {{ $json.score }}\nメール: {{ $json.email }}\n電話: {{ $json.phone }}\nWebsite: {{ $json.website }}\n\n理由: {{ $json.reasoning }}"
+        }
+      },
+      "id": "calendar-followup",
+      "name": "Google Calendar フォローアップ",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [1320, -100]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "リード管理" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "日付": "={{ new Date().toLocaleDateString('ja-JP') }}",
+            "企業名": "={{ $json.company }}",
+            "スコア": "={{ $json.score }}",
+            "メール": "={{ $json.email }}",
+            "電話": "={{ $json.phone }}",
+            "送信ステータス": "送信済み",
+            "フォローアップ日": "={{ DateTime.now().plus({ days: 3 }).toFormat('yyyy-MM-dd') }}"
+          }
+        }
+      },
+      "id": "sheets-lead-log",
+      "name": "Google Sheets リード記録",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1320, 100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.DISCORD_WEBHOOK_URL }}",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "content",
+              "value": "=📧 **リード収集＆メール送信完了**\n\n収集: {{ $('リードパース & 分類').item.json.total }}件\n🔥 HOT (≥70): {{ $('リードパース & 分類').item.json.hot_count }}件 → メール送信\n🟡 WARM (40-69): {{ $('リードパース & 分類').item.json.warm_count }}件\n\n📅 3日後にフォローアップ予定をカレンダー登録済み"
+            }
+          ]
+        }
+      },
+      "id": "notify-leads",
+      "name": "リード送信結果通知",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 200]
+    },
+    {
+      "parameters": {},
+      "id": "no-hot",
+      "name": "HOTリードなし",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1100, 400]
+    }
+  ],
+  "connections": {
+    "毎週月曜AM9:00": { "main": [[{ "node": "リード収集実行", "type": "main", "index": 0 }]] },
+    "リード収集実行": { "main": [[{ "node": "収集結果読み込み", "type": "main", "index": 0 }]] },
+    "収集結果読み込み": { "main": [[{ "node": "リードパース & 分類", "type": "main", "index": 0 }]] },
+    "リードパース & 分類": { "main": [[{ "node": "HOTリードあり？", "type": "main", "index": 0 }]] },
+    "HOTリードあり？": {
+      "main": [
+        [
+          { "node": "HOTリード展開", "type": "main", "index": 0 },
+          { "node": "リード送信結果通知", "type": "main", "index": 0 }
+        ],
+        [{ "node": "HOTリードなし", "type": "main", "index": 0 }]
+      ]
+    },
+    "HOTリード展開": {
+      "main": [[
+        { "node": "Resend メール送信", "type": "main", "index": 0 },
+        { "node": "Google Calendar フォローアップ", "type": "main", "index": 0 },
+        { "node": "Google Sheets リード記録", "type": "main", "index": 0 }
+      ]]
+    }
+  },
+  "settings": { "timezone": "Asia/Tokyo" }
+}

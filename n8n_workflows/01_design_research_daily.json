@@ -1,0 +1,153 @@
+{
+  "name": "🎨 デザイン自動調査 + 通知",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 3,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "毎日AM3:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "command": "cd /path/to/leadgenius-design-suite/design_research && python design_researcher_v2.py 2>&1"
+      },
+      "id": "run-research",
+      "name": "デザイン調査実行",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "filePath": "/path/to/leadgenius-design-suite/design_research/design_stock_v2/index.json"
+      },
+      "id": "read-index",
+      "name": "ストック読み込み",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// index.json からサマリーを生成\nconst index = JSON.parse($input.first().json.data);\nconst runs = index.runs || [];\nconst latestRun = runs[runs.length - 1] || {};\nconst entries = Object.values(index.entries || {});\n\n// 本日追加分\nconst today = new Date().toISOString().split('T')[0];\nconst todayEntries = entries.filter(e => (e.discovered_at || '').startsWith(today));\n\n// スコアTOP5\nconst top5 = [...entries].sort((a, b) => (b.design_score || 0) - (a.design_score || 0)).slice(0, 5);\n\n// トレンドタグ\nconst tagMap = {};\nentries.forEach(e => (e.tags || []).forEach(t => tagMap[t] = (tagMap[t] || 0) + 1));\nconst topTags = Object.entries(tagMap).sort((a, b) => b[1] - a[1]).slice(0, 8);\n\nreturn [{\n  json: {\n    total: entries.length,\n    new_today: todayEntries.length,\n    avg_score: latestRun.avg_score || 0,\n    queries: latestRun.queries || 0,\n    elapsed: latestRun.elapsed_sec || 0,\n    change_detected: (latestRun.change_detection || {}).changed || 0,\n    screenshots: latestRun.screenshots || 0,\n    top5: top5.map(e => `[${e.design_score}] ${e.aesthetic} - ${e.domain}`),\n    today_entries: todayEntries.map(e => `[${e.design_score}] ${e.aesthetic} - ${e.url}`),\n    top_tags: topTags.map(([t, c]) => `${t}(${c})`),\n    has_news: todayEntries.length > 0 || (latestRun.change_detection || {}).changed > 0\n  }\n}];"
+      },
+      "id": "parse-results",
+      "name": "結果パース",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "" },
+          "conditions": [
+            {
+              "id": "condition-has-news",
+              "leftValue": "={{ $json.has_news }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-has-news",
+      "name": "ニュースあり？",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [880, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.DISCORD_WEBHOOK_URL }}",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "content",
+              "value": "=🎨 **デザイン調査完了** ({{ new Date().toLocaleDateString('ja-JP') }})\n\n📊 **サマリー**\n新規: {{ $json.new_today }}件 / 総ストック: {{ $json.total }}件\n平均スコア: {{ $json.avg_score }} / 変化検知: {{ $json.change_detected }}件\n📸 スクリーンショット: {{ $json.screenshots }}枚\n\n🏆 **本日の新着**\n{{ $json.today_entries.join('\\n') || 'なし' }}\n\n🔥 **トレンドタグ**\n{{ $json.top_tags.join(' | ') }}"
+            }
+          ]
+        }
+      },
+      "id": "discord-notify",
+      "name": "Discord通知",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, -100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://notify-api.line.me/api/notify",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.LINE_NOTIFY_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "message",
+              "value": "=\n🎨 デザイン調査完了\n新規: {{ $json.new_today }}件\n変化検知: {{ $json.change_detected }}件\n\n{{ $json.today_entries.slice(0, 3).join('\\n') || '新着なし' }}"
+            }
+          ]
+        }
+      },
+      "id": "line-notify",
+      "name": "LINE通知",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 100]
+    },
+    {
+      "parameters": {},
+      "id": "no-news",
+      "name": "ニュースなし → スキップ",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1100, 300]
+    }
+  ],
+  "connections": {
+    "毎日AM3:00": { "main": [[{ "node": "デザイン調査実行", "type": "main", "index": 0 }]] },
+    "デザイン調査実行": { "main": [[{ "node": "ストック読み込み", "type": "main", "index": 0 }]] },
+    "ストック読み込み": { "main": [[{ "node": "結果パース", "type": "main", "index": 0 }]] },
+    "結果パース": { "main": [[{ "node": "ニュースあり？", "type": "main", "index": 0 }]] },
+    "ニュースあり？": {
+      "main": [
+        [
+          { "node": "Discord通知", "type": "main", "index": 0 },
+          { "node": "LINE通知", "type": "main", "index": 0 }
+        ],
+        [
+          { "node": "ニュースなし → スキップ", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "timezone": "Asia/Tokyo",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true
+  }
+}

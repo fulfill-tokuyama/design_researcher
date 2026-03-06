@@ -1,0 +1,195 @@
+{
+  "name": "✨ 高スコアデザイン → LP自動生成",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 6,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "schedule-6am",
+      "name": "毎日AM6:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "filePath": "/path/to/leadgenius-design-suite/design_research/design_stock_v2/index.json"
+      },
+      "id": "read-stock",
+      "name": "ストック読み込み",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 本日追加された高スコアデザインを抽出\nconst index = JSON.parse($input.first().json.data);\nconst entries = Object.entries(index.entries || {});\nconst today = new Date().toISOString().split('T')[0];\n\nconst highScore = entries\n  .filter(([id, e]) => {\n    const isToday = (e.discovered_at || '').startsWith(today);\n    const isHigh = (e.design_score || 0) >= 85;\n    return isToday && isHigh;\n  })\n  .map(([id, e]) => ({\n    id,\n    url: e.url,\n    domain: e.domain,\n    aesthetic: e.aesthetic,\n    score: e.design_score,\n    tags: (e.tags || []).join(', '),\n  }))\n  .sort((a, b) => b.score - a.score)\n  .slice(0, 3); // TOP3のみ\n\nif (highScore.length === 0) {\n  return [{ json: { skip: true } }];\n}\n\nreturn highScore.map(e => ({ json: e }));"
+      },
+      "id": "filter-high-score",
+      "name": "高スコア抽出 (≥85)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "id": "skip-check",
+              "leftValue": "={{ $json.skip }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "notEquals" }
+            }
+          ]
+        }
+      },
+      "id": "if-has-designs",
+      "name": "高スコアあり？",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.firecrawl.dev/v1/scrape",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.FIRECRAWL_API_KEY }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"url\": \"{{ $json.url }}\",\n  \"formats\": [\"branding\", \"screenshot\"]\n}"
+      },
+      "id": "firecrawl-branding",
+      "name": "Firecrawl デザインDNA取得",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [880, -100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-sonnet-4-20250514\",\n  \"max_tokens\": 8000,\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": \"You are a world-class web designer. Create a COMPLETE, production-ready single-page HTML landing page.\\n\\nDESIGN DNA (from reference site {{ $('Firecrawl デザインDNA取得').item.json.data.metadata.sourceURL || '' }}):\\n{{ JSON.stringify($('Firecrawl デザインDNA取得').item.json.data.branding || {}).substring(0, 3000) }}\\n\\nBUSINESS:\\nサービス名: AIO Insight\\n提供: Fulfill株式会社\\n内容: AI検索最適化（LLMO/AIO）診断・対策サービス\\nターゲット: 中小企業経営者（関西エリア）\\nCTA: 無料LLMO診断レポート申し込み\\n\\nRULES:\\n- Complete HTML with embedded CSS and JS. No frameworks.\\n- INSPIRED by the DNA, not a copy. Original design.\\n- Google Fonts. Responsive. Animations.\\n- ALL text in Japanese.\\n- Sections: Hero, Problem, Solution, Features, Trust, CTA, Footer.\\n- Top design agency quality.\\n- Output ONLY the HTML. No explanation. No backticks.\"\n  }]\n}"
+      },
+      "id": "claude-lp-gen",
+      "name": "Claude LP生成",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, -100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Claude レスポンスからHTMLを抽出して保存\nconst response = $input.first().json;\nlet html = '';\n\nif (response.content) {\n  const textBlock = response.content.find(b => b.type === 'text');\n  if (textBlock) {\n    html = textBlock.text.replace(/```html\\s*/g, '').replace(/```/g, '').trim();\n  }\n}\n\nconst date = new Date().toISOString().split('T')[0].replace(/-/g, '');\nconst refDomain = $('高スコア抽出 (≥85)').item.json.domain || 'unknown';\nconst filename = `lp_${refDomain}_${date}.html`;\n\nreturn [{\n  json: {\n    html,\n    filename,\n    ref_url: $('高スコア抽出 (≥85)').item.json.url,\n    ref_score: $('高スコア抽出 (≥85)').item.json.score,\n    ref_aesthetic: $('高スコア抽出 (≥85)').item.json.aesthetic,\n  }\n}];"
+      },
+      "id": "extract-html",
+      "name": "HTML抽出",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, -100]
+    },
+    {
+      "parameters": {
+        "fileName": "={{ $json.filename }}",
+        "fileContent": "={{ $json.html }}"
+      },
+      "id": "save-html",
+      "name": "HTMLファイル保存",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [1540, -200]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "Sheet1" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "日付": "={{ new Date().toLocaleDateString('ja-JP') }}",
+            "参考URL": "={{ $json.ref_url }}",
+            "スコア": "={{ $json.ref_score }}",
+            "スタイル": "={{ $json.ref_aesthetic }}",
+            "LP ファイル": "={{ $json.filename }}",
+            "ステータス": "レビュー待ち"
+          }
+        }
+      },
+      "id": "sheets-log",
+      "name": "Google Sheets 記録",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1540, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.DISCORD_WEBHOOK_URL }}",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "content",
+              "value": "=✨ **LP自動生成完了**\n\n参考: {{ $json.ref_url }}\nスタイル: {{ $json.ref_aesthetic }} (スコア: {{ $json.ref_score }})\nファイル: `{{ $json.filename }}`\n\nレビューしてください！"
+            }
+          ]
+        }
+      },
+      "id": "notify-lp",
+      "name": "LP生成通知",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1540, 200]
+    },
+    {
+      "parameters": {},
+      "id": "no-high-score",
+      "name": "高スコアなし → スキップ",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [880, 200]
+    }
+  ],
+  "connections": {
+    "毎日AM6:00": { "main": [[{ "node": "ストック読み込み", "type": "main", "index": 0 }]] },
+    "ストック読み込み": { "main": [[{ "node": "高スコア抽出 (≥85)", "type": "main", "index": 0 }]] },
+    "高スコア抽出 (≥85)": { "main": [[{ "node": "高スコアあり？", "type": "main", "index": 0 }]] },
+    "高スコアあり？": {
+      "main": [
+        [{ "node": "Firecrawl デザインDNA取得", "type": "main", "index": 0 }],
+        [{ "node": "高スコアなし → スキップ", "type": "main", "index": 0 }]
+      ]
+    },
+    "Firecrawl デザインDNA取得": { "main": [[{ "node": "Claude LP生成", "type": "main", "index": 0 }]] },
+    "Claude LP生成": { "main": [[{ "node": "HTML抽出", "type": "main", "index": 0 }]] },
+    "HTML抽出": {
+      "main": [[
+        { "node": "HTMLファイル保存", "type": "main", "index": 0 },
+        { "node": "Google Sheets 記録", "type": "main", "index": 0 },
+        { "node": "LP生成通知", "type": "main", "index": 0 }
+      ]]
+    }
+  },
+  "settings": { "timezone": "Asia/Tokyo" }
+}

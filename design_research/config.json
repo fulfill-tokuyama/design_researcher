@@ -1,0 +1,30 @@
+{
+  "big_keywords": [
+    "LP デザイン おしゃれ",
+    "ランディングページ デザイン 最新",
+    "SaaS LP デザイン",
+    "BtoB サービスサイト デザイン",
+    "AI サービス ランディングページ",
+    "不動産 ホームページ デザイン",
+    "コーポレートサイト かっこいい",
+    "DX サービス LP"
+  ],
+  "small_keyword_count": 5,
+  "daily_query_limit": 15,
+  "search_top_n": 10,
+  "max_analysis_per_run": 30,
+  "gemini_model": "gemini-2.0-flash",
+  "serper_gl": "jp",
+  "serper_hl": "ja",
+  "firecrawl_timeout": 30,
+  "exclude_domains": [
+    "pinterest.com", "youtube.com", "twitter.com", "x.com",
+    "facebook.com", "instagram.com", "amazon.co.jp", "rakuten.co.jp",
+    "wikipedia.org", "note.com", "qiita.com", "zenn.dev",
+    "hatena.ne.jp", "matome.naver.jp"
+  ],
+  "min_design_score": 50,
+  "enable_change_detection": true,
+  "change_detection_limit": 10,
+  "output_dir": "./design_stock_v2"
+}
