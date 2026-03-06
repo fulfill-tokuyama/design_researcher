@@ -551,14 +551,30 @@ class DesignResearchPipelineV2:
         # Supabase連携（オプション）
         try:
             from supabase_store import SupabaseDesignStore
-            supabase_url = os.getenv("SUPABASE_URL", "")
-            supabase_key = os.getenv("SUPABASE_KEY", "")
-            if supabase_url and supabase_key:
+            supabase_url = (os.getenv("SUPABASE_URL") or "").strip()
+            supabase_key = (os.getenv("SUPABASE_KEY") or "").strip()
+
+            # ダミー値の場合はスキップ（エラーではなくINFO）
+            def _is_dummy_supabase(url: str, key: str) -> bool:
+                if not url or not key:
+                    return True
+                if "xxxxx" in url.lower():
+                    return True
+                # プレースホルダー（例: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...）
+                if key.strip().endswith("..."):
+                    return True
+                return False
+
+            if _is_dummy_supabase(supabase_url, supabase_key):
+                log.info("   Supabase: 未設定（スキップ）")
+                self.supabase = None
+            elif supabase_url and supabase_key:
                 self.supabase = SupabaseDesignStore(supabase_url, supabase_key, self.gemini_key)
                 log.info("   Supabase: ✅")
             else:
                 self.supabase = None
-        except ImportError:
+        except Exception as e:
+            log.info(f"   Supabase: 接続スキップ ({e})")
             self.supabase = None
 
     def run(self):

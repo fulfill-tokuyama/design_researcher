@@ -99,21 +99,14 @@ class ScreenshotCapture:
         """Firecrawl API でフルページスクリーンショット"""
         try:
             resp = requests.post(
-                "https://api.firecrawl.dev/v1/scrape",
+                "https://api.firecrawl.dev/v2/scrape",
                 headers={
                     "Authorization": f"Bearer {self.firecrawl_key}",
                     "Content-Type": "application/json",
                 },
                 json={
                     "url": url,
-                    "formats": [
-                        {
-                            "type": "screenshot",
-                            "fullPage": True,
-                            "quality": 85,
-                            "viewport": {"width": 1280, "height": 800},
-                        }
-                    ],
+                    "formats": [{"type": "screenshot", "fullPage": True}],
                 },
                 timeout=60,
             )
@@ -123,11 +116,15 @@ class ScreenshotCapture:
             if data.get("success"):
                 screenshot_data = data.get("data", {}).get("screenshot", "")
                 if screenshot_data:
-                    # base64 デコードして保存
-                    if screenshot_data.startswith("data:image"):
-                        screenshot_data = screenshot_data.split(",", 1)[1]
-
-                    img_bytes = base64.b64decode(screenshot_data)
+                    # v2: URL または base64
+                    if screenshot_data.startswith("http"):
+                        img_resp = requests.get(screenshot_data, timeout=30)
+                        img_resp.raise_for_status()
+                        img_bytes = img_resp.content
+                    else:
+                        if screenshot_data.startswith("data:image"):
+                            screenshot_data = screenshot_data.split(",", 1)[1]
+                        img_bytes = base64.b64decode(screenshot_data)
                     filepath.write_bytes(img_bytes)
 
                     size_kb = len(img_bytes) / 1024

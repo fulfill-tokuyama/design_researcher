@@ -262,7 +262,7 @@ class DesignEmbedder:
         try:
             result = self.client.models.embed_content(
                 model="models/text-embedding-004",
-                content=text,
+                contents=text,
             )
             return result.embeddings[0].values
         except Exception as e:
