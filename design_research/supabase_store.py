@@ -30,6 +30,10 @@ from typing import Optional
 
 import requests
 
+# .env をプロジェクトルートから読み込み
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
 try:
     from supabase import create_client, Client
     HAS_SUPABASE = True
@@ -261,8 +265,9 @@ class DesignEmbedder:
         """Gemini embedding API呼び出し"""
         try:
             result = self.client.models.embed_content(
-                model="models/text-embedding-004",
+                model="models/gemini-embedding-001",
                 contents=text,
+                config=types.EmbedContentConfig(output_dimensionality=768),
             )
             return result.embeddings[0].values
         except Exception as e:
@@ -310,9 +315,9 @@ class SupabaseDesignStore:
         print(SCHEMA_SQL)
         print("=" * 60)
 
-        # スキーマSQLをファイルにも保存
+        # スキーマSQLをファイルにも保存（UTF-8で文字化け防止）
         path = Path("supabase_schema.sql")
-        path.write_text(SCHEMA_SQL)
+        path.write_text(SCHEMA_SQL, encoding="utf-8")
         log.info(f"📄 SQLファイル保存: {path}")
 
     # ─── CRUD ───
@@ -471,7 +476,7 @@ class SupabaseDesignStore:
             log.warning(f"ローカルストックが見つかりません: {index_path}")
             return
 
-        index = json.loads(index_path.read_text())
+        index = json.loads(index_path.read_text(encoding="utf-8"))
         entries = index.get("entries", {})
         total = len(entries)
         success = 0
@@ -481,7 +486,7 @@ class SupabaseDesignStore:
         for i, (entry_id, meta) in enumerate(entries.items()):
             detail_path = stock_path / f"{entry_id}.json"
             if detail_path.exists():
-                entry = json.loads(detail_path.read_text())
+                entry = json.loads(detail_path.read_text(encoding="utf-8"))
             else:
                 entry = meta
                 entry["id"] = entry_id
@@ -511,7 +516,7 @@ class SupabaseDesignStore:
         for entry in entries:
             eid = entry["id"]
             detail_path = stock_path / f"{eid}.json"
-            detail_path.write_text(json.dumps(entry, ensure_ascii=False, indent=2, default=str))
+            detail_path.write_text(json.dumps(entry, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
 
             index["entries"][eid] = {
                 "url": entry.get("url", ""),
@@ -525,7 +530,7 @@ class SupabaseDesignStore:
 
         index["total"] = len(index["entries"])
         index_path = stock_path / "index.json"
-        index_path.write_text(json.dumps(index, ensure_ascii=False, indent=2))
+        index_path.write_text(json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
 
         log.info(f"✅ ローカル同期完了: {len(entries)}件")
 
@@ -614,7 +619,7 @@ if __name__ == "__main__":
             print("以下のSQLを Supabase SQL Editor で実行:"),
             print("=" * 60),
             print(SCHEMA_SQL),
-            Path("supabase_schema.sql").write_text(SCHEMA_SQL),
+            Path("supabase_schema.sql").write_text(SCHEMA_SQL, encoding="utf-8"),
             print(f"\n📄 supabase_schema.sql に保存しました"),
         )
         store.init_schema()
