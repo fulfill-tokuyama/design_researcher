@@ -442,12 +442,69 @@ class SupabaseDesignStore:
         except Exception as e:
             err_str = str(e)
             if "404" in err_str or "NOT_FOUND" in err_str:
-                log.warning(
-                    "ベクトル検索失敗 (404): Supabase SQL Editorで supabase_grant_rpc.sql を実行し、"
-                    "NOTIFY pgrst, 'reload schema' でスキーマキャッシュをリロードしてください。"
+                log.info("RPC 404 → ローカル類似度計算でフォールバック")
+                return self._search_similar_fallback(
+                    query_embedding, threshold, limit, industry, min_score
                 )
             else:
                 log.warning(f"ベクトル検索失敗: {e}")
+            return []
+
+    def _search_similar_fallback(
+        self,
+        query_embedding: list[float],
+        threshold: float,
+        limit: int,
+        industry: str = None,
+        min_score: float = 0,
+    ) -> list[dict]:
+        """RPC失敗時: 全エントリ取得してPythonで類似度計算"""
+        try:
+            if not self.client:
+                return []
+            resp = (
+                self.client.table("design_entries")
+                .select("id, url, domain, aesthetic, design_score, industry, tags, overview, embedding")
+                .not_.is_("embedding", "null")
+                .gte("design_score", min_score)
+                .limit(500)
+                .execute()
+            )
+            entries = resp.data or []
+            if industry:
+                entries = [e for e in entries if e.get("industry") == industry]
+
+            def cosine_sim(a: list, b: list) -> float:
+                if not a or not b or len(a) != len(b):
+                    return 0.0
+                dot = sum(x * y for x, y in zip(a, b))
+                na = sum(x * x for x in a) ** 0.5
+                nb = sum(x * x for x in b) ** 0.5
+                if na == 0 or nb == 0:
+                    return 0.0
+                return dot / (na * nb)
+
+            scored = []
+            for e in entries:
+                emb = e.get("embedding")
+                if isinstance(emb, str):
+                    try:
+                        emb = json.loads(emb)
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                if isinstance(emb, list) and len(emb) == len(query_embedding):
+                    sim = cosine_sim(query_embedding, emb)
+                else:
+                    continue
+                if sim >= threshold:
+                    scored.append({
+                        **{k: v for k, v in e.items() if k != "embedding"},
+                        "similarity": round(sim, 4),
+                    })
+            scored.sort(key=lambda x: x["similarity"], reverse=True)
+            return scored[:limit]
+        except Exception as e:
+            log.warning(f"フォールバック検索失敗: {e}")
             return []
 
     def search_similar_to_entry(
