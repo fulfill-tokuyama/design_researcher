@@ -12,6 +12,11 @@ import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 
+# スクリプトのディレクトリをモジュール検索パスに追加
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -21,13 +26,14 @@ log = logging.getLogger("scheduler_v2")
 
 
 class DailyScheduler:
-    def __init__(self, hour: int = 3, minute: int = 0, config_path: str = "config_v2.json"):
+    def __init__(self, hour: int = 3, minute: int = 0, config_path: str = "config.json"):
         self.hour = hour
         self.minute = minute
         self.config_path = config_path
         self.running = True
         signal.signal(signal.SIGINT, lambda *_: setattr(self, "running", False))
-        signal.signal(signal.SIGTERM, lambda *_: setattr(self, "running", False))
+        if hasattr(signal, "SIGTERM"):
+            signal.signal(signal.SIGTERM, lambda *_: setattr(self, "running", False))
 
     def _next_run(self) -> datetime:
         now = datetime.now()
@@ -144,7 +150,7 @@ if __name__ == "__main__":
     p.add_argument("--run-now", action="store_true")
     p.add_argument("--hour", type=int, default=3)
     p.add_argument("--minute", type=int, default=0)
-    p.add_argument("--config", default="config_v2.json")
+    p.add_argument("--config", default="config.json")
     args = p.parse_args()
 
     if args.setup_cron:

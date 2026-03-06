@@ -99,14 +99,15 @@ class ScreenshotCapture:
         """Firecrawl API でフルページスクリーンショット"""
         try:
             resp = requests.post(
-                "https://api.firecrawl.dev/v2/scrape",
+                "https://api.firecrawl.dev/v1/scrape",
                 headers={
                     "Authorization": f"Bearer {self.firecrawl_key}",
                     "Content-Type": "application/json",
                 },
                 json={
                     "url": url,
-                    "formats": [{"type": "screenshot", "fullPage": True}],
+                    "formats": ["screenshot"],
+                    "screenshot": {"fullPage": True},
                 },
                 timeout=60,
             )
@@ -660,7 +661,7 @@ class DesignMonitor:
         for f in files:
             try:
                 changes.append(json.loads(f.read_text()))
-            except:
+            except (json.JSONDecodeError, OSError):
                 pass
 
         major = sum(1 for c in changes if c.get("change_level") == "major")

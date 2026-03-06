@@ -26,17 +26,22 @@ import json
 import hashlib
 import re
 import os
+import sys
+
+# スクリプトのディレクトリをモジュール検索パスに追加
+from pathlib import Path
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
 
 # .env をプロジェクトルートから読み込み
-from pathlib import Path
 from dotenv import load_dotenv
-load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+load_dotenv(_SCRIPT_DIR.parent / ".env")
 
 import time
 import logging
 import random
 from datetime import datetime
-from pathlib import Path
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 from urllib.parse import urlparse
@@ -107,7 +112,7 @@ DEFAULT_CONFIG = {
 }
 
 
-def load_config(path: str = "config_v2.json") -> dict:
+def load_config(path: str = "config.json") -> dict:
     config = DEFAULT_CONFIG.copy()
     if Path(path).exists():
         with open(path, "r", encoding="utf-8") as f:
@@ -151,6 +156,7 @@ class DesignEntry:
 
     # メタ
     data_source: str = ""               # "firecrawl" | "scrapling" | "both"
+    screenshot_path: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -791,7 +797,7 @@ class DesignResearchPipelineV2:
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="デザイン自動調査 v2")
-    parser.add_argument("--config", "-c", default="config_v2.json")
+    parser.add_argument("--config", "-c", default="config.json")
     parser.add_argument("--report-only", action="store_true")
     parser.add_argument("--check-changes", action="store_true", help="変化検知のみ実行")
     parser.add_argument("--screenshot", type=str, help="指定URLのスクリーンショット")

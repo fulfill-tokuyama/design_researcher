@@ -15,13 +15,19 @@ Scrapling(収集) → Gemini(分析・メール生成) → Resend(送信) → Ca
 
 import json
 import argparse
+import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
+# スクリプトのディレクトリをモジュール検索パスに追加
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+
 # .env をプロジェクトルートから読み込み
 from dotenv import load_dotenv
-load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+load_dotenv(_SCRIPT_DIR.parent / ".env")
 
 from lead_spider import CompanyWebsiteSpider, LeadManager, LeadData
 from lead_enricher import LeadEnricher
@@ -68,10 +74,11 @@ class EmailSender:
     def send(self, to_email: str, subject: str, body: str) -> dict:
         """メール送信"""
         try:
-            # プレーンテキストをHTML化（改行対応）
-            html_body = body.replace('\n', '<br>')
+            import html as html_module
+            # HTMLエスケープしてからHTML化（XSS対策）
+            html_body = html_module.escape(body).replace('\n', '<br>')
             html_body = f"""
-            <div style="font-family: 'Hiragino Sans', 'Yu Gothic', sans-serif; 
+            <div style="font-family: 'Hiragino Sans', 'Yu Gothic', sans-serif;
                         font-size: 14px; line-height: 1.8; color: #333;">
                 {html_body}
             </div>
@@ -222,16 +229,22 @@ class LeadGeniusPipeline:
         """Step 4: 結果のエクスポート"""
         # JSON出力
         json_path = self.output_dir / f"pipeline_result_{timestamp}.json"
+        result_data = {
+            "pipeline_run": timestamp,
+            "config": {
+                "min_score": self.config.min_score,
+                "dry_run": self.config.dry_run,
+            },
+            "total": len(leads),
+            "leads": leads,
+        }
         with open(json_path, 'w', encoding='utf-8') as f:
-            json.dump({
-                "pipeline_run": timestamp,
-                "config": {
-                    "min_score": self.config.min_score,
-                    "dry_run": self.config.dry_run,
-                },
-                "total": len(leads),
-                "leads": leads,
-            }, f, ensure_ascii=False, indent=2)
+            json.dump(result_data, f, ensure_ascii=False, indent=2)
+        
+        # n8n連携用: 常に最新結果を pipeline_result_latest.json にコピー
+        latest_path = self.output_dir / "pipeline_result_latest.json"
+        with open(latest_path, 'w', encoding='utf-8') as f:
+            json.dump(result_data, f, ensure_ascii=False, indent=2)
         
         print(f"   ✅ {json_path}")
         
