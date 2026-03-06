@@ -33,6 +33,10 @@ design_stock_v2/
 design_stock/
 leads_output/
 pipeline_output/
+lead_scraper/output/
+
+# LP自動生成の出力
+design_research/generated_lps/
 
 # Screenshots (large files)
 screenshots/
@@ -53,3 +57,5 @@ systemd_error.log
 node_modules/
 .next/
 out/
+
+.vercel

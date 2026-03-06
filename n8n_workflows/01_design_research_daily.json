@@ -20,7 +20,7 @@
     },
     {
       "parameters": {
-        "command": "cd /path/to/leadgenius-design-suite/design_research && python design_researcher_v2.py 2>&1"
+        "command": "cd /d C:\\Users\\tokuc\\design_researcher\\design_research && python design_researcher_v2.py 2>&1"
       },
       "id": "run-research",
       "name": "デザイン調査実行",
@@ -30,7 +30,7 @@
     },
     {
       "parameters": {
-        "filePath": "/path/to/leadgenius-design-suite/design_research/design_stock_v2/index.json"
+        "filePath": "C:/Users/tokuc/design_researcher/design_research/design_stock_v2/index.json"
       },
       "id": "read-index",
       "name": "ストック読み込み",

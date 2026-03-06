@@ -20,7 +20,7 @@
     },
     {
       "parameters": {
-        "filePath": "/path/to/leadgenius-design-suite/design_research/design_stock_v2/index.json"
+        "filePath": "C:/Users/tokuc/design_researcher/design_research/design_stock_v2/index.json"
       },
       "id": "read-stock",
       "name": "ストック読み込み",
@@ -100,24 +100,13 @@
     },
     {
       "parameters": {
-        "jsCode": "// Claude レスポンスからHTMLを抽出して保存\nconst response = $input.first().json;\nlet html = '';\n\nif (response.content) {\n  const textBlock = response.content.find(b => b.type === 'text');\n  if (textBlock) {\n    html = textBlock.text.replace(/```html\\s*/g, '').replace(/```/g, '').trim();\n  }\n}\n\nconst date = new Date().toISOString().split('T')[0].replace(/-/g, '');\nconst refDomain = $('高スコア抽出 (≥85)').item.json.domain || 'unknown';\nconst filename = `lp_${refDomain}_${date}.html`;\n\nreturn [{\n  json: {\n    html,\n    filename,\n    ref_url: $('高スコア抽出 (≥85)').item.json.url,\n    ref_score: $('高スコア抽出 (≥85)').item.json.score,\n    ref_aesthetic: $('高スコア抽出 (≥85)').item.json.aesthetic,\n  }\n}];"
+        "jsCode": "// Claude レスポンスからHTMLを抽出して保存\nconst response = $input.first().json;\nlet html = '';\n\nif (response.content) {\n  const textBlock = response.content.find(b => b.type === 'text');\n  if (textBlock) {\n    html = textBlock.text.replace(/```html\\s*/g, '').replace(/```/g, '').trim();\n  }\n}\n\nconst date = new Date().toISOString().split('T')[0].replace(/-/g, '');\nconst refDomain = $('高スコア抽出 (≥85)').item.json.domain || 'unknown';\nconst filename = `lp_${refDomain}_${date}.html`;\n\n// ファイル保存\nconst fs = require('fs');\nconst path = require('path');\nconst dir = 'C:/Users/tokuc/design_researcher/design_research/generated_lps';\nfs.mkdirSync(dir, { recursive: true });\nfs.writeFileSync(path.join(dir, filename), html, 'utf8');\n\nreturn [{\n  json: {\n    html,\n    filename,\n    ref_url: $('高スコア抽出 (≥85)').item.json.url,\n    ref_score: $('高スコア抽出 (≥85)').item.json.score,\n    ref_aesthetic: $('高スコア抽出 (≥85)').item.json.aesthetic,\n  }\n}];"
       },
       "id": "extract-html",
       "name": "HTML抽出",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [1320, -100]
-    },
-    {
-      "parameters": {
-        "fileName": "={{ $json.filename }}",
-        "fileContent": "={{ $json.html }}"
-      },
-      "id": "save-html",
-      "name": "HTMLファイル保存",
-      "type": "n8n-nodes-base.readWriteFile",
-      "typeVersion": 1,
-      "position": [1540, -200]
     },
     {
       "parameters": {
@@ -185,7 +174,6 @@
     "Claude LP生成": { "main": [[{ "node": "HTML抽出", "type": "main", "index": 0 }]] },
     "HTML抽出": {
       "main": [[
-        { "node": "HTMLファイル保存", "type": "main", "index": 0 },
         { "node": "Google Sheets 記録", "type": "main", "index": 0 },
         { "node": "LP生成通知", "type": "main", "index": 0 }
       ]]

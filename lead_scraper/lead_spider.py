@@ -274,40 +274,65 @@ class CompanyWebsiteSpider(Spider):
             scraped_at=datetime.now().isoformat(),
             area="関西",
         )
-        
-        page_text = response.css('body').get("")
-        
+
+        try:
+            page_text = response.css('body').get("")
+        except (UnicodeDecodeError, Exception):
+            # Shift-JIS等のエンコーディング対策
+            try:
+                raw = response.css('body')
+                page_text = raw._root.text_content() if raw else ""
+            except Exception:
+                page_text = ""
+
         # タイトルから企業名を推定
-        title = response.css('title::text').get("")
+        try:
+            title = response.css('title::text').get("")
+        except (UnicodeDecodeError, Exception):
+            title = ""
         lead.company_name = self._extract_company_name(title, response)
-        
+
         # 電話番号
         phones = extract_phone(page_text)
         if phones:
             lead.phone = phones[0]
-        
+
         # メールアドレス
-        email_links = response.css('a[href^="mailto:"]')
+        try:
+            email_links = response.css('a[href^="mailto:"]')
+        except Exception:
+            email_links = []
         if email_links:
             lead.email = email_links[0].attrib.get('href', '').replace('mailto:', '')
         else:
             emails = extract_email(page_text)
             if emails:
                 lead.email = emails[0]
-        
+
         # 会社概要ページを探してフォロー
-        about_links = response.css(
-            'a[href*="company"], a[href*="about"], '
-            'a[href*="gaiyou"], a[href*="profile"], '
-            'a[href*="corporate"]'
-        )
-        
+        try:
+            about_links = response.css(
+                'a[href*="company"], a[href*="about"], '
+                'a[href*="gaiyou"], a[href*="profile"], '
+                'a[href*="corporate"]'
+            )
+        except Exception:
+            about_links = []
+
         # テキストで「会社概要」リンクを探す
         if not about_links:
-            about_links = response.find_by_text('会社概要', tag='a')
+            try:
+                about_links = response.find_by_text('会社概要')
+                about_links = [a for a in about_links if a.tag == 'a'] if about_links else []
+            except Exception:
+                about_links = []
         if not about_links:
-            about_links = response.find_by_text('企業情報', tag='a')
-        
+            try:
+                about_links = response.find_by_text('企業情報')
+                about_links = [a for a in about_links if a.tag == 'a'] if about_links else []
+            except Exception:
+                about_links = []
+
         if about_links:
             href = about_links[0].attrib.get('href', '')
             if href:
@@ -317,7 +342,7 @@ class CompanyWebsiteSpider(Spider):
                     cb_kwargs={"lead": lead}
                 )
                 return
-        
+
         # 会社概要ページが見つからない場合はトップページから収集
         self._extract_from_page(response, lead, page_text)
         if lead.is_valid():
@@ -326,7 +351,14 @@ class CompanyWebsiteSpider(Spider):
 
     async def parse_company_page(self, response: Response, lead: LeadData):
         """会社概要ページの解析"""
-        page_text = response.css('body').get("")
+        try:
+            page_text = response.css('body').get("")
+        except (UnicodeDecodeError, Exception):
+            try:
+                raw = response.css('body')
+                page_text = raw._root.text_content() if raw else ""
+            except Exception:
+                page_text = ""
         self._extract_from_page(response, lead, page_text)
         
         if lead.is_valid():

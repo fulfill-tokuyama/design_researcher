@@ -1,15 +1,20 @@
 """
 LeadGenius AI - 統合パイプライン
-Scrapling(収集) → Gemini(分析・メール生成) → Resend(送信) → Calendar(フォローアップ)
+Firecrawl+Gemini(収集) → Gemini(分析・メール生成) → Resend(送信)
+
+スクレイパー:
+    --scraper firecrawl  (デフォルト) Firecrawl + Gemini で高精度収集
+    --scraper scrapling   Scrapling Spider でローカル収集
 
 環境変数:
-    GEMINI_API_KEY:  Google Gemini APIキー
-    RESEND_API_KEY:  Resend APIキー
-    SENDER_EMAIL:    送信元メールアドレス
+    GEMINI_API_KEY:     Google Gemini APIキー
+    FIRECRAWL_API_KEY:  Firecrawl APIキー (firecrawlモード時)
+    RESEND_API_KEY:     Resend APIキー
+    SENDER_EMAIL:       送信元メールアドレス
 
 使用方法:
-    python pipeline.py --targets targets.json
     python pipeline.py --targets targets.json --dry-run
+    python pipeline.py --targets targets.json --scraper firecrawl --dry-run
     python pipeline.py --targets targets.json --min-score 60
 """
 
@@ -20,6 +25,9 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 # スクリプトのディレクトリをモジュール検索パスに追加
 _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -29,8 +37,21 @@ if str(_SCRIPT_DIR) not in sys.path:
 from dotenv import load_dotenv
 load_dotenv(_SCRIPT_DIR.parent / ".env")
 
-from lead_spider import CompanyWebsiteSpider, LeadManager, LeadData
 from lead_enricher import LeadEnricher
+
+# Scrapling (optional)
+try:
+    from lead_spider import CompanyWebsiteSpider, LeadManager, LeadData
+    HAS_SCRAPLING = True
+except ImportError:
+    HAS_SCRAPLING = False
+
+# Firecrawl scraper
+try:
+    import lead_scraper_fc
+    HAS_FIRECRAWL = True
+except ImportError:
+    HAS_FIRECRAWL = False
 
 # Resend (pip install resend)
 try:
@@ -51,7 +72,8 @@ class PipelineConfig:
     dry_run: bool = False         # True: メール送信しない
     output_dir: str = "./pipeline_output"
     max_emails_per_run: int = 20  # 1回の実行での最大送信数
-    
+    scraper: str = "firecrawl"    # "firecrawl" or "scrapling"
+
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
             if hasattr(self, k):
@@ -103,12 +125,12 @@ class EmailSender:
 class LeadGeniusPipeline:
     """
     LeadGenius AI 統合パイプライン
-    
+
     フロー:
-        1. Scrapling で企業Webサイトからリード情報を収集
-        2. Gemini API でスコアリング＋メール生成
+        1. Firecrawl+Gemini / Scrapling で企業情報を収集
+        2. Gemini API でスコアリング + メール生成
         3. Resend でメール送信
-        4. 結果をJSON/CSVにエクスポート
+        4. 結果をJSONにエクスポート
     """
     
     def __init__(self, config: PipelineConfig):
@@ -125,6 +147,7 @@ class LeadGeniusPipeline:
         print("🚀 LeadGenius AI パイプライン開始")
         print(f"   実行時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"   対象URL数: {len(target_urls)}")
+        print(f"   スクレイパー: {self.config.scraper}")
         print(f"   最低スコア: {self.config.min_score}")
         print(f"   Dry Run: {self.config.dry_run}")
         print("=" * 60)
@@ -159,11 +182,44 @@ class LeadGeniusPipeline:
     
     def _step_scrape(self, target_urls: list[str]) -> list[dict]:
         """Step 1: スクレイピング"""
+        if self.config.scraper == "firecrawl":
+            return self._scrape_firecrawl(target_urls)
+        else:
+            return self._scrape_scrapling(target_urls)
+
+    def _scrape_firecrawl(self, target_urls: list[str]) -> list[dict]:
+        """Firecrawl + Gemini でリード収集"""
+        if not HAS_FIRECRAWL:
+            print("   ⚠️ lead_scraper_fc モジュールが見つかりません")
+            return []
+
+        import tempfile, os
+        # 一時ファイルにURLリストを書き出してlead_scraper_fcを呼ぶ
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False, encoding="utf-8"
+        )
+        json.dump(target_urls, tmp, ensure_ascii=False)
+        tmp.close()
+
+        output_path = str(self.output_dir / "leads_raw.json")
+        try:
+            leads = lead_scraper_fc.run(tmp.name, output_path)
+        finally:
+            os.unlink(tmp.name)
+
+        print(f"   ✅ {len(leads)}件のリードを収集 (Firecrawl)")
+        return leads
+
+    def _scrape_scrapling(self, target_urls: list[str]) -> list[dict]:
+        """Scrapling Spider でリード収集"""
+        if not HAS_SCRAPLING:
+            print("   ⚠️ Scrapling が見つかりません: pip install 'scrapling[all]'")
+            return []
+
         spider = CompanyWebsiteSpider(target_urls=target_urls)
-        result = spider.start()
-        
+        spider.start()
         leads = [lead.to_dict() for lead in spider.leads]
-        print(f"   ✅ {len(leads)}件のリードを収集")
+        print(f"   ✅ {len(leads)}件のリードを収集 (Scrapling)")
         return leads
     
     def _step_enrich(self, leads: list[dict]) -> list[dict]:
@@ -317,7 +373,13 @@ def main():
         default="./pipeline_output",
         help="出力ディレクトリ（デフォルト: ./pipeline_output）"
     )
-    
+    parser.add_argument(
+        "--scraper",
+        choices=["firecrawl", "scrapling"],
+        default="firecrawl",
+        help="スクレイパー選択（デフォルト: firecrawl）"
+    )
+
     args = parser.parse_args()
     
     # ターゲットURL読み込み
@@ -337,6 +399,7 @@ def main():
         min_score=args.min_score,
         dry_run=args.dry_run,
         output_dir=args.output,
+        scraper=args.scraper,
     )
     
     pipeline = LeadGeniusPipeline(config)

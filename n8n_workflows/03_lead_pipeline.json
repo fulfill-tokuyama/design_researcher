@@ -22,7 +22,7 @@
     },
     {
       "parameters": {
-        "command": "cd /path/to/leadgenius-design-suite/lead_scraper && python pipeline.py --targets targets.json --dry-run --output ./output 2>&1"
+        "command": "cd /d C:\\Users\\tokuc\\design_researcher\\lead_scraper && python pipeline.py --targets targets.json --dry-run --output ./output 2>&1"
       },
       "id": "run-scraper",
       "name": "リード収集実行",
@@ -33,7 +33,7 @@
     },
     {
       "parameters": {
-        "filePath": "/path/to/leadgenius-design-suite/lead_scraper/output/pipeline_result_*.json",
+        "filePath": "C:/Users/tokuc/design_researcher/lead_scraper/output/pipeline_result_latest.json",
         "options": { "fileName": "" }
       },
       "id": "read-results",

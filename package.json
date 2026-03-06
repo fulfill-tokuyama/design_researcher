@@ -5,7 +5,13 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "n8n": "npx n8n start",
+    "n8n:workflow": "cross-env N8N_NODES_INCLUDE=n8n-nodes-base.executeCommand npx n8n start"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "n8n": "^1.62.0"
   },
   "dependencies": {
     "next": "^14.2.0",
