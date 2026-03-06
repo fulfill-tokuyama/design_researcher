@@ -19,6 +19,10 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
+# .env をプロジェクトルートから読み込み
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
 from lead_spider import CompanyWebsiteSpider, LeadManager, LeadData
 from lead_enricher import LeadEnricher
 

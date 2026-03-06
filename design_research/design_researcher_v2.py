@@ -26,6 +26,12 @@ import json
 import hashlib
 import re
 import os
+
+# .env をプロジェクトルートから読み込み
+from pathlib import Path
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
 import time
 import logging
 import random
@@ -207,18 +213,30 @@ class SerperSearch:
     API_URL = "https://google.serper.dev/search"
 
     def __init__(self, api_key: str, gl: str = "jp", hl: str = "ja"):
-        self.api_key = api_key
+        self.api_key = (api_key or "").strip()
         self.gl = gl
         self.hl = hl
 
     def search(self, query: str, num: int = 10) -> list[dict]:
         try:
+            headers = {
+                "x-api-key": self.api_key,  # Serper公式: x-api-key (小文字)
+                "Content-Type": "application/json",
+            }
             resp = requests.post(
                 self.API_URL,
-                headers={"X-API-KEY": self.api_key, "Content-Type": "application/json"},
+                headers=headers,
                 json={"q": query, "gl": self.gl, "hl": self.hl, "num": num},
                 timeout=10,
             )
+
+            if resp.status_code == 403:
+                log.warning(
+                    f"  Serper 403 Forbidden: API_KEY先頭5文字={self.api_key[:5] if self.api_key else '(空)'}***, "
+                    f"URL={self.API_URL}, レスポンス={resp.text[:200]}"
+                )
+                return []
+
             resp.raise_for_status()
             data = resp.json()
 
@@ -488,10 +506,20 @@ class DesignResearchPipelineV2:
     def __init__(self, config: dict = None):
         self.cfg = config or load_config()
 
-        # API キー取得
-        self.gemini_key = os.getenv("GEMINI_API_KEY", "")
-        self.serper_key = os.getenv("SERPER_API_KEY", "")
-        self.firecrawl_key = os.getenv("FIRECRAWL_API_KEY", "")
+        # API キー取得（前後の空白を除去）
+        self.gemini_key = (os.getenv("GEMINI_API_KEY") or "").strip()
+        self.serper_key = (os.getenv("SERPER_API_KEY") or "").strip()
+        self.firecrawl_key = (os.getenv("FIRECRAWL_API_KEY") or "").strip()
+
+        # デバッグ: キーの先頭5文字をログ出力（読み込み確認用）
+        if self.gemini_key:
+            log.info(f"   [DEBUG] GEMINI_API_KEY 読み込みOK: 先頭5文字={self.gemini_key[:5]}***")
+        else:
+            log.warning("   [DEBUG] GEMINI_API_KEY が空です")
+        if self.serper_key:
+            log.info(f"   [DEBUG] SERPER_API_KEY 読み込みOK: 先頭5文字={self.serper_key[:5]}***")
+        else:
+            log.warning("   [DEBUG] SERPER_API_KEY が空です")
 
         if not self.gemini_key:
             raise ValueError("GEMINI_API_KEY を設定してください")
